@@ -1,0 +1,5 @@
+Please, do note that the documentation presented here is from:
+linux-stable/Documentation/spi/
+
+The good documentation about SPI drivers is given by:
+https://wiki.t-firefly.com/en/Firefly-RK3128/driver_spi.html
