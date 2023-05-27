@@ -1,4 +1,4 @@
-## spi_slave_spidev.c (still in EXPERIMENTAL DEVELOPMENT)
+## spi_slave_spidev.c
 
 Nowadays, the linux spi framework does fully support the spi slave
 framework, so no need to make own spi slave driver, since this is
@@ -471,10 +471,12 @@ And here is the first level of match device tree source (spi 0 slave):
 		};
 	};
 
-The entry "spi-max-frequency = x000000" is deleted, since master is
-the one who dictates the frequency.
+The entry "spi-max-frequency = xy000000" is deleted, since master is
+the one who dictates the frequency, slave has the maximum sampling
+rate given to resample (usually lower than the master, but these two
+master and slave frequences must match!
 
-### The preliminary results (for Android 12)
+### The results (for Android 12)
 
 #### /sys/class directory
 
@@ -506,3 +508,4 @@ Example given for i.MX8 where lpspi0 is @ address 0x5a000000
 	0x01010004
 
 Please, consult NXP i.MX8 documentation.
+

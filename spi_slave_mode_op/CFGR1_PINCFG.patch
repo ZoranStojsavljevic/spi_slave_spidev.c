@@ -1,0 +1,35 @@
+For the spi slave implementation in Configuration Register 1 (CFGR1)
+bits 25-24 should be of value 00b, since there should be NO swap of
+SDI and SDO for the spi slave mode (SDI => MISO, SDO => MOSI).
+
+The kludge here: true kernel driver spi-fsl-lpspi.c was developed from
+the DVT NXP driver for testing the i.MX7/8 spi controllers, not fully
+tested on all master/slave (spi slave is error prone) options!
+
+diff --git a/drivers/spi/spi-fsl-lpspi.c b/drivers/spi/spi-fsl-lpspi.c
+index f608f89f45cd..bc1447cdee28 100644
+--- a/drivers/spi/spi-fsl-lpspi.c
++++ b/drivers/spi/spi-fsl-lpspi.c
+@@ -409,8 +409,19 @@ static int fsl_lpspi_config(struct fsl_lpspi_data *fsl_lpspi)
+ 
+        if (!fsl_lpspi->is_slave)
+                temp = CFGR1_MASTER;
+-       else
+-               temp = CFGR1_PINCFG;
++       else {
++               /*
++                * It is a SPI slave support, mode is
++                * Configuration Register 1 (CFGR1)
++                * bits 25-24 PINCFG
++                * 00b - SDI is used for input data
++                * and SDO is used for output data
++                */
++               // temp = CFGR1_PINCFG;
++               // temp = readl(fsl_lpspi->base + IMX7ULP_CFGR1);
++               // temp &= ~CFGR1_PINCFG;
++               temp = 0;
++       }
+        if (fsl_lpspi->config.mode & SPI_CS_HIGH)
+                temp |= CFGR1_PCSPOL;
+        writel(temp, fsl_lpspi->base + IMX7ULP_CFGR1);
+

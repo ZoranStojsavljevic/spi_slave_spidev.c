@@ -18,7 +18,7 @@
 #define FD_INVAL (-1)
 
 #define TX_ARRAY_SIZE	8
-#define RX_ARRAY_SIZE	8
+#define RX_ARRAY_SIZE	1
 
 static bool running = false;
 
@@ -27,9 +27,10 @@ static const char *device = "/dev/spidev0.0";
 static uint32_t tx_actual_length;
 static uint32_t rx_actual_length;
 
-static uint32_t bits_per_word = 8;
-static uint8_t mode;
-static uint32_t bytes_per_load = 4;
+static uint8_t	bits_per_word = 8;
+static uint8_t	mode;
+static uint32_t	clk_max;
+static uint32_t	bytes_per_load = 4;
 
 static int transfer_8bit(int fd)
 {
@@ -56,76 +57,82 @@ static int transfer_8bit(int fd)
 	return ret;
 }
 
-static int read_8bit(int fd)
-{
-	uint8_t rx[RX_ARRAY_SIZE];
-	int ret;
-	int i;
-	uint32_t length;
-
-	printf("Receive:\n");
-
-	ret = ioctl(fd, SPI_IOC_RD_MODE32, &length);
-	if (ret == -1) {
-		printf("failed to read the length?\n");
-		return -1;
-	}
-
-	ret = read(fd, rx, length);
-	if (ret < 0) {
-		printf("failed to read the message!\n");
-		return -1;
-	}
-
-	for (i = 0; i < length; i++) {
-		printf("0x%.2X ", rx[i]);
-
-		if (i%8 == 7)
-			printf("\n");
-	}
-	return ret;
-}
-
 static int put_setting(int fd)
 {
 	int ret = 0;
 
-	ret = ioctl(fd, SPI_IOC_WR_BITS_PER_WORD, &bits_per_word);
-	if (ret == -1)
-		return -1;
+	if (FD_INVAL == fd) {
+		printf("SPI device '%s' not opened\n", device);
+		ret = EBADF;
+	} else {
+		printf("set SPI clock max to %d Hz\n", clk_max);
+		ret = ioctl(fd, SPI_IOC_WR_MAX_SPEED_HZ, &(clk_max));
+		if (0 > ret) {
+			printf("unable to set SPI clock max to %d Hz: %s\n", clk_max,
+					strerror(errno));
+			return errno;
+		}
 
-	ret = ioctl(fd, SPI_IOC_WR_MODE, &mode);
-	if (ret == -1)
-		return -1;
+		ret = ioctl(fd, SPI_IOC_WR_BITS_PER_WORD, &bits_per_word);
+		if (0 > ret) {
+			printf("unable to set bits per word to %d, %s\n", bits_per_word,
+					strerror(errno));
+			return errno;
+		}
+
+		ret = ioctl(fd, SPI_IOC_WR_MODE, &mode);
+		if (0 > ret) {
+			printf("unable to set mode to %d, %s\n", mode,
+					strerror(errno));
+			return errno;
+		}
+	}
 
 	return ret;
 }
 
 static int get_setting(int fd)
 {
-	int	ret = 0;
+	char		buffer[33];
+	int		ret;
+	uint32_t	return_arg;
+
+	printf("======= get_setting() =======\n");
 
 	if (FD_INVAL == fd) {
 		printf("SPI device '%s' not opened\n", device);
 		ret = EBADF;
 	} else {
-		ret = ioctl(fd, SPI_IOC_WR_BITS_PER_WORD, &bits_per_word);
-		if (-1 == ret)
-			return ret;
+		ret = ioctl(fd, SPI_IOC_RD_MODE, (uint8_t *)&return_arg);
+		if (0 > ret) {
+			printf("unable to read SPI mode, %s\n", strerror(errno));
+			ret = errno;
+			goto out;
+		}
+		printf("set SPI mode to %d\n", (uint8_t)return_arg);
 
-		ret = ioctl(fd, SPI_IOC_WR_MODE32, &tx_actual_length);
-		if (-1 == ret)
-			return ret;
+		ret = ioctl(fd, SPI_IOC_RD_MAX_SPEED_HZ, (uint32_t *)&return_arg);
+		if (0 > ret) {
+			printf("unable to read SPI clock max, %s\n", strerror(errno));
+			ret = errno;
+			goto out;
+		}
+		sprintf(buffer, "%u", return_arg);
+		printf("set SPI clock max to %s Hz\n", buffer);
 
-		ret = ioctl(fd, SPI_IOC_RD_MODE32, &rx_actual_length);
-		if (-1 == ret)
-			return ret;
-
-		ret = ioctl(fd, SPI_IOC_RD_MODE, &mode);
-		if (-1 == ret)
-			return ret;
+		ret = ioctl(fd, SPI_IOC_RD_BITS_PER_WORD, (uint8_t *)&return_arg);
+		if (0 > ret) {
+			printf("unable to read SPI bit per word, %s\n", strerror(errno));
+			ret = errno;
+			goto out;
+		}
+		sprintf(buffer, "%d", (uint8_t)return_arg);
+		printf("set SPI bits per word to %s\n", buffer);
 	}
 
+out:
+
+	printf("======= end get_setting() =======\n");
 	return ret;
 }
 
@@ -141,8 +148,9 @@ static void print_usage(const char *prog)
 	printf("Usage: %s [-dbs?ewm]\n", prog);
 	puts("  -d --device	device to use (default /dev/spidev0.0\n"
 	     "  -b --bpw	bits per word (default 8 bits)\n"
-	     "  -?  --help	print help\n"
-	     "  -m  --m         slave mode 0-master, 1-slave\n"
+	     "  -m --m		mode: 0, 1, 2 or 3\n"
+	     "  -c --c		maximum clock slave\n"
+	     "  -? --help	print help\n"
 	     "\n");
 	exit(1);
 }
@@ -151,15 +159,16 @@ static void parse_opts(int argc, char *argv[])
 {
 	while (1) {
 		static const struct option lopts[] = {
-			{ "device", required_argument,	0, 'd' },
-			{ "bpw",    required_argument,	0, 'b' },
-			{ "mode",   required_argument,  0, 'm' },
-			{ "help",   no_argument,	0, '?' },
-			{ NULL,	    0,			0,  0  },
+			{ "device",	required_argument,	0, 'd' },
+			{ "bpw",    	required_argument,	0, 'b' },
+			{ "mode",   	required_argument,	0, 'm' },
+			{ "clk_max",	required_argument,	0, 'c' },
+			{ "help",	no_argument,		0, '?' },
+			{ NULL,		0,			0,  0  },
 		};
 		int c;
 
-		c = getopt_long(argc, argv, "d:b:w:m:?", lopts, NULL);
+		c = getopt_long(argc, argv, "d:b:m:c:?", lopts, NULL);
 
 		if (c == -1)
 			break;
@@ -174,6 +183,9 @@ static void parse_opts(int argc, char *argv[])
 		case 'm':
 			mode = atoi(optarg);
 			break;
+		case 'c':
+			clk_max = atoi(optarg);
+			break;
 		case '?':
 			print_usage(device);
 			break;
@@ -183,12 +195,45 @@ static void parse_opts(int argc, char *argv[])
 	}
 }
 
+static int read_8bit(int fd)
+{
+	uint8_t rx[RX_ARRAY_SIZE];
+	int ret;
+	int i;
+	uint32_t length;
+
+	// Just for debugging purposes
+	// get_setting(fd);
+
+	printf("Receive:");
+
+	length = sizeof(rx);
+	// printf("the length is %d\n", length);
+
+	ret = read(fd, rx, length);
+	if (ret < 0) {
+		printf("failed to read the message!\n");
+		return -1;
+	}
+
+	for (i = 0; i < length; i++) {
+		printf("0x%.2X\n", rx[i]);
+
+//		if (i%8 == 7)
+//			printf("\n");
+	}
+	return ret;
+}
+
 int main(int argc, char *argv[])
 {
-	int		ret = 0;
-	int		fd;
+	int	ret = 0;
+	int	fd = FD_INVAL;
 
 	parse_opts(argc, argv);
+	printf("the device is %s\n", device);
+	printf("the slave_app version is [2]\n");
+
 	fd = open(device, O_RDWR);
 
 	if (fd < 0) {
@@ -206,6 +251,8 @@ int main(int argc, char *argv[])
 	ret = put_setting(fd);
 	if (ret == -1)
 		return -1;
+
+	get_setting(fd);
 
 	running = true;
 
