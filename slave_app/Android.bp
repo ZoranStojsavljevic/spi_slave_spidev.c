@@ -1,0 +1,9 @@
+cc_binary {
+	name: "slave_app",
+	product_specific: true,
+	// notice: "NOTICE",
+
+	srcs: ["slave_app.c"],
+
+	shared_libs: ["liblog"],
+}

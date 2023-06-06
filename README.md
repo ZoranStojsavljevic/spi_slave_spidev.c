@@ -83,7 +83,7 @@ The four (4) very important structures you need to know about from spi
 framework are outlined below:
 
 	struct spi_device {
-	struct spi_controller {
+	struct spi_controller {	<<<======= underlying controller!
 	struct spi_transfer {
 	struct spi_message {
 
@@ -507,5 +507,5 @@ Example given for i.MX8 where lpspi0 is @ address 0x5a000000
 	busybox devmem 0x5a000000 32	// lpspi version number 32 bit reg 0
 	0x01010004
 
-Please, consult NXP i.MX8 documentation.
+Please, consult NXP i.MX8QM documentation.
 

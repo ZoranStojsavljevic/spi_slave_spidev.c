@@ -70,3 +70,16 @@ To recap (from NXP's i.MX8 documentation):
 	0b - Continuous transfer is disabled
 	1b - Continuous transfer is enabled
 
+### Latest development on the LPSPI Driver settings
+
+DMA mode is disabled, and some PIN_CTRL definitions in .dtsi are
+changed accordingly for the drive controller:
+
+	croot/drivers/spi/spi-fsl-lpspi.c
+
+and:
+
+	croot/arch/arm64/boot/dts/freescale/*.dtsi
+
+These changes are NOT to be shown here. It is a deep dig proprietary
+job done!

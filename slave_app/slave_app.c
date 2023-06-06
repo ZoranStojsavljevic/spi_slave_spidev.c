@@ -18,20 +18,18 @@
 #define FD_INVAL (-1)
 
 #define TX_ARRAY_SIZE	8
-#define RX_ARRAY_SIZE	1
+#define RX_ARRAY_SIZE	128
 
 static bool running = false;
 
 static const char *device = "/dev/spidev0.0";
 
-static uint32_t tx_actual_length;
-static uint32_t rx_actual_length;
+static uint8_t  bits_per_word = 8;
+static uint8_t  mode = 0;
+static uint8_t  lsb_first = 0;		// 0-MSB, 1-LSB bit order
+static uint32_t	clk_max;		// clk_max = 1MHz
 
-static uint8_t	bits_per_word = 8;
-static uint8_t	mode;
-static uint32_t	clk_max;
-static uint32_t	bytes_per_load = 4;
-
+#if 0 // Not used to xmit, only to receive in slave test mode
 static int transfer_8bit(int fd)
 {
 	int ret = 0;
@@ -56,10 +54,12 @@ static int transfer_8bit(int fd)
 
 	return ret;
 }
+#endif
 
 static int put_setting(int fd)
 {
-	int ret = 0;
+	const char	*endian;
+	int		ret = 0;
 
 	if (FD_INVAL == fd) {
 		printf("SPI device '%s' not opened\n", device);
@@ -86,6 +86,14 @@ static int put_setting(int fd)
 					strerror(errno));
 			return errno;
 		}
+
+		endian = (lsb_first ? "LSB" : "MSB");
+		ret = ioctl(fd, SPI_IOC_WR_LSB_FIRST, &lsb_first);
+		if (0 > ret) {
+			printf("unable to set SPI to %s first: %s\n", endian,
+					strerror(errno));
+			return errno;
+		}
 	}
 
 	return ret;
@@ -94,6 +102,7 @@ static int put_setting(int fd)
 static int get_setting(int fd)
 {
 	char		buffer[33];
+	const char	*endian;
 	int		ret;
 	uint32_t	return_arg;
 
@@ -120,6 +129,15 @@ static int get_setting(int fd)
 		sprintf(buffer, "%u", return_arg);
 		printf("set SPI clock max to %s Hz\n", buffer);
 
+		ret = ioctl(fd, SPI_IOC_RD_LSB_FIRST, (uint8_t *)&return_arg);
+		if (0 > ret) {
+			printf("unable to read SPI to LSB first: %s\n", strerror(errno));
+			ret = errno;
+			goto out;
+		}
+		endian = ((uint8_t)return_arg ? "LSB" : "MSB");
+		printf("set SPI to %s first\n", endian);
+
 		ret = ioctl(fd, SPI_IOC_RD_BITS_PER_WORD, (uint8_t *)&return_arg);
 		if (0 > ret) {
 			printf("unable to read SPI bit per word, %s\n", strerror(errno));
@@ -138,18 +156,21 @@ out:
 
 static void print_setting(void)
 {
-	printf("TX length:%d, RX length:%d, Bits per word:%d\n",
-	       tx_actual_length, rx_actual_length, bits_per_word);
+	printf("Device to use: %s\n", device);
+	printf("LSB first [0-MSB, 1-LSB bit order]: %d\n", lsb_first);
+	printf("MAX clock slave: %u\n", clk_max);
 	printf("Mode:%d\n", mode);
+	printf("Bits per word: %d\n", bits_per_word);
 }
 
 static void print_usage(const char *prog)
 {
-	printf("Usage: %s [-dbs?ewm]\n", prog);
+	printf("Usage: %s [-dbmlc?]\n", prog);
 	puts("  -d --device	device to use (default /dev/spidev0.0\n"
 	     "  -b --bpw	bits per word (default 8 bits)\n"
-	     "  -m --m		mode: 0, 1, 2 or 3\n"
-	     "  -c --c		maximum clock slave\n"
+	     "  -m --m  	mode: 0, 1, 2 or 3\n"
+	     "  -l --l  	lsb_first: 0-MSB, 1-LSB bit order\n"
+	     "  -c --c  	maximum clock slave\n"
 	     "  -? --help	print help\n"
 	     "\n");
 	exit(1);
@@ -160,15 +181,16 @@ static void parse_opts(int argc, char *argv[])
 	while (1) {
 		static const struct option lopts[] = {
 			{ "device",	required_argument,	0, 'd' },
-			{ "bpw",    	required_argument,	0, 'b' },
-			{ "mode",   	required_argument,	0, 'm' },
+			{ "bpw",	required_argument,	0, 'b' },
+			{ "mode",	required_argument,	0, 'm' },
+			{ "lsb_first",	required_argument,	0, 'l' },
 			{ "clk_max",	required_argument,	0, 'c' },
 			{ "help",	no_argument,		0, '?' },
 			{ NULL,		0,			0,  0  },
 		};
 		int c;
 
-		c = getopt_long(argc, argv, "d:b:m:c:?", lopts, NULL);
+		c = getopt_long(argc, argv, "d:b:m:l:c:?", lopts, NULL);
 
 		if (c == -1)
 			break;
@@ -182,6 +204,9 @@ static void parse_opts(int argc, char *argv[])
 			break;
 		case 'm':
 			mode = atoi(optarg);
+			break;
+		case 'l':
+			lsb_first = atoi(optarg);
 			break;
 		case 'c':
 			clk_max = atoi(optarg);
@@ -197,15 +222,14 @@ static void parse_opts(int argc, char *argv[])
 
 static int read_8bit(int fd)
 {
-	uint8_t rx[RX_ARRAY_SIZE];
-	int ret;
-	int i;
-	uint32_t length;
+	char		c;
+	char		rx[RX_ARRAY_SIZE+1];
+	int		ret;
+	int		i;
+	uint32_t	length;
 
 	// Just for debugging purposes
 	// get_setting(fd);
-
-	printf("Receive:");
 
 	length = sizeof(rx);
 	// printf("the length is %d\n", length);
@@ -217,10 +241,18 @@ static int read_8bit(int fd)
 	}
 
 	for (i = 0; i < length; i++) {
-		printf("0x%.2X\n", rx[i]);
+		// c = (isprint(rx[i]) ? (char)c : '.');
+		if (0x20 <= rx[i] && 0x7e >= rx[i]) {
+			c = (char)rx[i];
+		} else {
+			c = '.';
+		}
 
-//		if (i%8 == 7)
-//			printf("\n");
+		printf("%c", c);
+		// printf("0x%.2X", rx[i]);
+
+		if (i%length == (length - 1))
+			printf("\n");
 	}
 	return ret;
 }
@@ -232,7 +264,7 @@ int main(int argc, char *argv[])
 
 	parse_opts(argc, argv);
 	printf("the device is %s\n", device);
-	printf("the slave_app version is [2]\n");
+	printf("the slave_app version is [1.07]\n");
 
 	fd = open(device, O_RDWR);
 
