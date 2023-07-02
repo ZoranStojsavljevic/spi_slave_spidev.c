@@ -1,0 +1,9 @@
+cc_binary {
+    name: "spidev_test",
+    product_specific: true,
+    // notice: "NOTICE",
+
+    srcs: ["spidev_test.c"],
+
+    shared_libs: ["libcap", "liblog"],
+}
